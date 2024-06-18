@@ -44,18 +44,18 @@ This script was created for personal notification of power outages for non-comme
     In the SQLite shell, create the `energy` table:
     ```sql
     CREATE TABLE energy (
-        cherga INTEGER PRIMARY KEY,
+        queue INTEGER PRIMARY KEY,
         now_day TEXT
     );
     ```
     Insert initial data:
     ```sql
-    INSERT INTO energy (cherga, now_day) VALUES (1, '');
-    INSERT INTO energy (cherga, now_day) VALUES (2, '');
-    INSERT INTO energy (cherga, now_day) VALUES (3, '');
-    INSERT INTO energy (cherga, now_day) VALUES (4, '');
-    INSERT INTO energy (cherga, now_day) VALUES (5, '');
-    INSERT INTO energy (cherga, now_day) VALUES (6, '');
+    INSERT INTO energy (queue, now_day) VALUES (1, '');
+    INSERT INTO energy (queue, now_day) VALUES (2, '');
+    INSERT INTO energy (queue, now_day) VALUES (3, '');
+    INSERT INTO energy (queue, now_day) VALUES (4, '');
+    INSERT INTO energy (queue, now_day) VALUES (5, '');
+    INSERT INTO energy (queue, now_day) VALUES (6, '');
     .quit
     ```
 

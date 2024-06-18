@@ -18,43 +18,44 @@ channels = {1: os.environ.get('CHANNEL_1'),
 TELEGRAM_BOT = os.environ.get('TELEGRAM_BOT')
 
 
-def telegram_send_text(chat_id, text=None):
+def telegram_send_text(chat_id: str, text: str):
     tg_url = f'https://api.telegram.org/bot{TELEGRAM_BOT}/sendMessage'
     response = requests.post(tg_url, json={'chat_id': chat_id, 'parse_mode': 'html', 'text': text})
     print(response.text)
 
 
-def save_db(cherga, now_day):
+def save_db(queue: int, now_day: str):
     conn = sqlite3.connect('energy.db')
     c = conn.cursor()
     sql_query = (f'UPDATE energy '
                  f'SET now_day = "{now_day}"'
-                 f'WHERE cherga = "{cherga}";')
+                 f'WHERE queue = "{queue}";')
     c.execute(sql_query)
     conn.commit()
     conn.close()
 
 
-def if_update(cherga):
+def if_update(queue: int):
     conn = sqlite3.connect('energy.db')
     c = conn.cursor()
-    sql_query = f'Select * from energy where cherga = "{cherga}";'
+    sql_query = f'Select now_day, queue  from energy where queue = "{queue}";'
     c.execute(sql_query)
-    tmp = c.fetchone()
-    return tmp[1], tmp[2]
+    now_day, queue = c.fetchone()
+    return now_day, queue
 
 
-def parse(cherga):
+def parse(queue: int):
     scraper = cloudscraper.create_scraper()
-    url = f'https://energy-ua.info/cherga/{cherga}'
+    url = f'https://energy-ua.info/cherga/{queue}'
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/91.0.4472.124 Safari/537.36'
     }
     response = scraper.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'html.parser')
     grafiks = soup.find_all(class_='grafik_string')
     formated_now_day = '\n'.join(grafiks[0].text.strip().split('\n'))
-    now_day, b = if_update(cherga)
+    now_day, b = if_update(queue)
     time.sleep(2)
     return formated_now_day, now_day
 
@@ -65,6 +66,6 @@ if __name__ == '__main__':
         if site_now_day != db_now_day:
             save_db(i, site_now_day)
             telegram_send_text(text=site_now_day, chat_id=channels.get(i))
+            print(f'Queue: {i} send')
         else:
-            print(f'Cherga: {i} is skipped')
-
+            print(f'Queue: {i} is skipped')
