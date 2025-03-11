@@ -45,6 +45,22 @@ def telegram_send_text(chat_id: str, text: str):
     return response.json().get("result").get("message_id")
 
 
+def telegram_send_text_button(chat_id: str, text: str, button_text: str = None, callback_data: str = None):
+    tg_url = f'https://api.telegram.org/bot{TELEGRAM_BOT}/sendMessage'
+    reply_markup = {
+        "inline_keyboard": [[{"text": button_text, "callback_data": callback_data}]]
+    }
+    payload = {"chat_id": chat_id, "parse_mode": "html", "text": text, "reply_markup": reply_markup}
+
+    response = requests.post(tg_url, json=payload)
+    if response.json().get("ok"):
+        logger.info(response.json())
+    else:
+        logger.error(response.json())
+    return response.json().get("result", {}).get("message_id")
+
+
+
 def telegram_update_message(chat_id: str, message_id, text: str):
     tg_url = f'https://api.telegram.org/bot{TELEGRAM_BOT}/editMessageText'
     response = requests.post(
@@ -221,8 +237,8 @@ def pars_html(response):
     for gvp in gvps:
         date = gvp.find('b', style='color: red;')
         date = convert_date(date.text)
-        about_day = gvp.find_all('b')
-        if any("<b>плануємо не застосовувати</b>" in str(tag) for tag in about_day):
+        about_day = gvp.find_all('div')
+        if any("застосування графіка погодинного відключення електроенергії у Полтавській області не прогнозується." in str(gvp) for tag in about_day):
             logger.info(f"No power outages")
             schedulers.append((gvp.text.strip(), date))
         gvps_table = gvp.find('table', class_='turnoff-scheduleui-table')
@@ -292,8 +308,10 @@ def send_notification_outages(date, no_power_outages: str):
     sleep(1)
     log_message = get_schedule_send_log(queue='0', date=date)
     if log_message[0] != no_power_outages:
-        for queue in range(1, 7):
-            telegram_send_text(chat_id=CHANNELS.get(int(queue)), text=no_power_outages.split('.')[0])
+        telegram_send_text_button(chat_id=TELEGRAM_ADMIN, text=no_power_outages.split('.')[0],
+                                  button_text="Send to all", callback_data=f"send_all_{date}")
+        # for queue in range(1, 7):
+            # telegram_send_text(chat_id=CHANNELS.get(int(queue)), text=no_power_outages.split('.')[0])
         save_schedule_send_log(queue='0', text=no_power_outages, date=date, tg_mess_id=0)
         logger.info(f"Send notification power outages - Date: {date}")
     else:
