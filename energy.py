@@ -60,7 +60,6 @@ def telegram_send_text_button(chat_id: str, text: str, button_text: str = None, 
     return response.json().get("result", {}).get("message_id")
 
 
-
 def telegram_update_message(chat_id: str, message_id, text: str):
     tg_url = f'https://api.telegram.org/bot{TELEGRAM_BOT}/editMessageText'
     response = requests.post(
@@ -90,24 +89,20 @@ def telegram_delete_message(chat_id: str, message_id):
 def site_poe_gvp(date_in):
     url = "https://www.poe.pl.ua/customs/newgpv-info.php"
     headers = {
-        "accept": "application/json, text/javascript, */*; q=0.01",
-        "accept-language": "ru-RU,ru;q=0.9,uk;q=0.8,en-US;q=0.7,en;q=0.6",
-        "cache-control": "no-cache",
-        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "dnt": "1",
-        "origin": "https://www.poe.pl.ua",
-        "pragma": "no-cache",
-        "priority": "u=1, i",
-        "referer": "https://www.poe.pl.ua/disconnection/power-outages/",
-        "sec-ch-ua": '"Opera";v="111", "Chromium";v="125", "Not.A/Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
-                      " Chrome/125.0.0.0 Safari/537.36 OPR/111.0.0.0",
-        "x-requested-with": "XMLHttpRequest"
+        "accept": "application/json, text/javascript, /; q=0.01",
+       "accept-language": "ru-RU,ru;q=0.9,uk;q=0.8,en-US;q=0.7,en;q=0.6",
+       "cache-control": "no-cache",
+       "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+       "dnt": "1",
+       "origin": "https://www.poe.pl.ua",
+       "pragma": "no-cache",
+       "priority": "u=1, i",
+       "referer": "https://www.poe.pl.ua/disconnection/power-outages/",
+       "sec-ch-ua": '"Opera";v="115", "Chromium";v="127", "Not.A/Brand";v="26"', "sec-ch-ua-mobile": "?0",
+       "sec-ch-ua-platform": '"Windows"', "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
+       "sec-fetch-site": "same-origin",
+       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 OPR/115.0.0.0",
+       "x-requested-with": "XMLHttpRequest"
     }
     data = {"seldate": f'{{"date_in":"{date_in}"}}'}
     response = requests.post(url, headers=headers, data=data)
@@ -173,6 +168,29 @@ def get_schedule_send_log(queue: str, date: str):
     if not result:
         return ['']
     return result
+
+
+def is_last_seven_days_outages_count() -> bool:
+    conn = sqlite3.connect("energy.db")
+    try:
+        c = conn.cursor()
+        sql_query = '''
+            SELECT text FROM send_log_v2
+            WHERE queue = '0'
+            ORDER BY rowid DESC
+            LIMIT 7
+        '''
+        c.execute(sql_query)
+        rows = c.fetchall()
+        if not rows or len(rows) < 7:
+            return False
+        for row in rows:
+            text = row[0] or ''
+            if 'не прогнозується' not in text.lower():
+                return False
+        return True
+    finally:
+        conn.close()
 
 
 def get_count_all_time_schedule(schedule_arr: list) -> str:
@@ -308,10 +326,11 @@ def send_notification_outages(date, no_power_outages: str):
     sleep(1)
     log_message = get_schedule_send_log(queue='0', date=date)
     if log_message[0] != no_power_outages:
-        telegram_send_text_button(chat_id=TELEGRAM_ADMIN, text=no_power_outages.split('.')[0],
-                                  button_text="Send to all", callback_data=f"send_all_{date}")
-        # for queue in range(1, 7):
-            # telegram_send_text(chat_id=CHANNELS.get(int(queue)), text=no_power_outages.split('.')[0])
+        if is_last_seven_days_outages_count():
+            telegram_send_text(chat_id=TELEGRAM_ADMIN, text=no_power_outages.split('.')[0])
+        else:
+            for channel_id in CHANNELS.values():
+                telegram_send_text(chat_id=channel_id, text=no_power_outages.split('.')[0])
         save_schedule_send_log(queue='0', text=no_power_outages, date=date, tg_mess_id=0)
         logger.info(f"Send notification power outages - Date: {date}")
     else:
