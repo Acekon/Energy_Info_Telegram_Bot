@@ -107,9 +107,9 @@ def site_poe_gvp(date_in):
     data = {"seldate": f'{{"date_in":"{date_in}"}}'}
     response = requests.post(url, headers=headers, data=data)
     if response.status_code != 200:
-        logger.error(f'Status code error {response.status_code}\n{response.text}')
+        logger.error(f'Status code error {response.status_code}\n')
         telegram_send_text(chat_id=TELEGRAM_ADMIN,
-                           text=f'Status code error {response.status_code}\n{response.text}')
+                           text=f'Status code error {response.status_code}\n')
         return False
     logger.info(f'Load new info {response.url} http:{response.status_code}')
     with open(f'logs/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
@@ -118,19 +118,22 @@ def site_poe_gvp(date_in):
 
 
 def convert_date(date_str: str):
-    months = {
-        "січня": "January", "лютого": "February", "березня": "March",
-        "квітня": "April", "травня": "May", "червня": "June",
-        "липня": "July", "серпня": "August", "вересня": "September",
-        "жовтня": "October", "листопада": "November", "грудня": "December"
-    }
-    for ukr_month, eng_month in months.items():
-        if ukr_month in date_str:
-            date_str = date_str.replace(ukr_month, eng_month)
-            break
-    date_str = date_str.replace(" року", "")
-    date_format = "%d %B %Y"
-    date_obj = datetime.strptime(date_str, date_format)
+    try:
+        months = {
+            "січня": "January", "лютого": "February", "березня": "March",
+            "квітня": "April", "травня": "May", "червня": "June",
+            "липня": "July", "серпня": "August", "вересня": "September",
+            "жовтня": "October", "листопада": "November", "грудня": "December"
+        }
+        for ukr_month, eng_month in months.items():
+            if ukr_month in date_str:
+                date_str = date_str.replace(ukr_month, eng_month)
+                break
+        date_str = date_str.replace(" року", "")
+        date_format = "%d %B %Y"
+        date_obj = datetime.strptime(date_str, date_format)
+    except ValueError as e:
+        return False
     return date_obj.strftime('%d-%m-%Y')
 
 
@@ -142,7 +145,7 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     db = c.fetchone()
     if db:
         sql_query = (f'UPDATE send_log_v2 '
-                     f'SET text = "{text}" and tg_mess_id = "{tg_mess_id}" '
+                     f'SET text = "{text}", tg_mess_id = "{tg_mess_id}" '
                      f'WHERE date = "{date}" and queue = "{queue}";')
         logger.info(sql_query)
         c.execute(sql_query)
@@ -253,8 +256,10 @@ def pars_html(response):
     gvps = soup.find_all('div', class_='gpvinfodetail')
     schedulers = []
     for gvp in gvps:
-        date = gvp.find('b', style='color: red;')
-        date = convert_date(date.text)
+        for date in gvp.find_all('b'):
+            if convert_date(date.text.strip()):
+                date = convert_date(date.text.strip())
+                break
         about_day = gvp.find_all('div')
         if any("застосування графіка погодинного відключення електроенергії у Полтавській області не прогнозується." in str(gvp) for tag in about_day):
             logger.info(f"No power outages")
@@ -312,6 +317,8 @@ def send_notification_schedulers(schedulers, date: str):
         mess_schedule = source_schedule[0].get("data")
         time_pairs = [f"{mess_schedule[i]} {mess_schedule[i + 1]}" for i in range(0, len(mess_schedule), 2)]
         times = '\n'.join(time_pairs)
+        if not times:
+            times = "Черга не входить у період відключень"
         text = f'Черга {sub_num_queue}, Відключення на {date}:\n' + f"{times}"
         if log_message[0] != text:
             tg_mess_id = telegram_send_text(chat_id=CHANNELS.get(int(num_queue)), text=text)
@@ -351,6 +358,8 @@ def main(debug):
         response = site_poe_gvp(formatted_date)
     if not response:
         return logger.info('The site returns bad html code of the website')
+    if response is False:
+        return logger.info('The site is not available currently')
     schedulers = pars_html(response)
     for schedule in schedulers:
         data_schedule = schedule[0]
