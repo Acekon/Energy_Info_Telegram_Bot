@@ -90,19 +90,19 @@ def site_poe_gvp(date_in):
     url = "https://www.poe.pl.ua/customs/newgpv-info.php"
     headers = {
         "accept": "application/json, text/javascript, /; q=0.01",
-       "accept-language": "ru-RU,ru;q=0.9,uk;q=0.8,en-US;q=0.7,en;q=0.6",
-       "cache-control": "no-cache",
-       "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-       "dnt": "1",
-       "origin": "https://www.poe.pl.ua",
-       "pragma": "no-cache",
-       "priority": "u=1, i",
-       "referer": "https://www.poe.pl.ua/disconnection/power-outages/",
-       "sec-ch-ua": '"Opera";v="115", "Chromium";v="127", "Not.A/Brand";v="26"', "sec-ch-ua-mobile": "?0",
-       "sec-ch-ua-platform": '"Windows"', "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
-       "sec-fetch-site": "same-origin",
-       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 OPR/115.0.0.0",
-       "x-requested-with": "XMLHttpRequest"
+        "accept-language": "ru-RU,ru;q=0.9,uk;q=0.8,en-US;q=0.7,en;q=0.6",
+        "cache-control": "no-cache",
+        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "dnt": "1",
+        "origin": "https://www.poe.pl.ua",
+        "pragma": "no-cache",
+        "priority": "u=1, i",
+        "referer": "https://www.poe.pl.ua/disconnection/power-outages/",
+        "sec-ch-ua": '"Opera";v="115", "Chromium";v="127", "Not.A/Brand";v="26"', "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"', "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 OPR/115.0.0.0",
+        "x-requested-with": "XMLHttpRequest"
     }
     data = {"seldate": f'{{"date_in":"{date_in}"}}'}
     response = requests.post(url, headers=headers, data=data)
@@ -113,7 +113,8 @@ def site_poe_gvp(date_in):
         return False
     logger.info(f'Load new info {response.url} http:{response.status_code}')
     with open(f'logs/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
-        file.write(response.text)
+        html_page = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="table.css">\n' + response.text
+        file.write(html_page)
     return response.text
 
 
@@ -140,7 +141,7 @@ def convert_date(date_str: str):
 def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     conn = sqlite3.connect("energy.db")
     c = conn.cursor()
-    sql_query_select = f'SELECT * FROM send_log_v2 WHERE date = "{date}" AND queue = {queue};'
+    sql_query_select = f'SELECT text, tg_mess_id  FROM send_log_v2 WHERE date = "{date}" AND queue = {queue};'
     c.execute(sql_query_select)
     db = c.fetchone()
     if db:
@@ -151,7 +152,7 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
         c.execute(sql_query)
         conn.commit()
         conn.close()
-        return True
+        return db
     sql_query = (f'INSERT OR IGNORE INTO send_log_v2 '
                  f'(date,text,queue,tg_mess_id) '
                  f'VALUES ("{date}","{text}",{queue},{tg_mess_id})')
@@ -159,6 +160,7 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     c.execute(sql_query)
     conn.commit()
     conn.close()
+    return None, None
 
 
 def get_schedule_send_log(queue: str, date: str):
@@ -261,7 +263,9 @@ def pars_html(response):
                 date = convert_date(date.text.strip())
                 break
         about_day = gvp.find_all('div')
-        if any("застосування графіка погодинного відключення електроенергії у Полтавській області не прогнозується." in str(gvp) for tag in about_day):
+        if any(
+                "застосування графіка погодинного відключення електроенергії у Полтавській області не прогнозується." in str(
+                        gvp) for tag in about_day):
             logger.info(f"No power outages")
             schedulers.append((gvp.text.strip(), date))
         gvps_table = gvp.find('table', class_='turnoff-scheduleui-table')
@@ -315,14 +319,22 @@ def send_notification_schedulers(schedulers, date: str):
             merged_data[queue].extend(entry['data'])
         source_schedule = [{'queue': queue, 'data': times} for queue, times in merged_data.items()]
         mess_schedule = source_schedule[0].get("data")
-        time_pairs = [f"{mess_schedule[i]} {mess_schedule[i + 1]}" for i in range(0, len(mess_schedule), 2)]
+        time_pairs = [f"{mess_schedule[i]} - {mess_schedule[i + 1]}" for i in range(0, len(mess_schedule), 2)]
         times = '\n'.join(time_pairs)
         if not times:
             times = "Черга не входить у період відключень"
-        text = f'Черга {sub_num_queue}, Відключення на {date}:\n' + f"{times}"
+        text = f"Черга {sub_num_queue}, Відключення на {date}:\n <blockquote>{times}</blockquote>"
         if log_message[0] != text:
             tg_mess_id = telegram_send_text(chat_id=CHANNELS.get(int(num_queue)), text=text)
-            save_schedule_send_log(queue=sub_num_queue, text=text, date=date, tg_mess_id=tg_mess_id)
+            old_text, old_mess_id = save_schedule_send_log(queue=sub_num_queue,
+                                                           text=text,
+                                                           date=date,
+                                                           tg_mess_id=tg_mess_id)
+            if old_mess_id:
+                sleep(1)
+                telegram_update_message(chat_id=CHANNELS.get(int(num_queue)),
+                                        message_id=old_mess_id,
+                                        text=f"<s>{old_text}</s>\n UPD: Оновлено графік")
             logger.info(f"Send notification - Date: {date} Queue: {sub_num_queue}")
         else:
             logger.info(f"Skip notification is no update - Date: {date} Queue: {sub_num_queue} ")
