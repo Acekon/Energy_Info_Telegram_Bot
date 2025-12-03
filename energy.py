@@ -17,7 +17,7 @@ CHANNELS = {
     5: os.environ.get("CHANNEL_5"),
     6: os.environ.get("CHANNEL_6"),
 }
-ENERGY_CHANEL = os.environ.get("CHANNEL_0")
+ENERGY_CHANNEL = os.environ.get("CHANNEL_0")
 
 TELEGRAM_BOT = os.environ.get("TELEGRAM_BOT")
 TELEGRAM_ADMIN = os.environ.get("TELEGRAM_ADMIN")
@@ -206,7 +206,7 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     c.execute(sql_query, (date, text, queue, tg_mess_id))
     conn.commit()
     conn.close()
-    return None, None
+
 
 
 def get_schedule_send_log(queue: str, date: str):
@@ -489,7 +489,7 @@ def main(debug):
             send_notification_schedulers(schedulers=data_schedule, date=date)
     if total_durations.is_update:
         total = total_durations.get()
-        telegram_send_text(chat_id=ENERGY_CHANEL, text=f'Загальний час відключень на: {date}\n<code>{total}</code>')
+        telegram_send_text(chat_id=ENERGY_CHANNEL, text=f'Загальний час відключень на: {date}\n<code>{total}</code>')
         logger.info('The site is updated successfully')
         total_durations.is_update = False
 
