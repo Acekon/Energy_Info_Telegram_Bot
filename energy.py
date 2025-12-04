@@ -206,6 +206,7 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     c.execute(sql_query, (date, text, queue, tg_mess_id))
     conn.commit()
     conn.close()
+    return True, True
 
 
 
@@ -437,7 +438,7 @@ def send_notification_schedulers(schedulers, date: str):
                                                            text=text,
                                                            date=date,
                                                            tg_mess_id=tg_mess_id)
-            if old_mess_id:
+            if not old_mess_id:
                 sleep(1)
                 telegram_update_message(chat_id=CHANNELS.get(int(num_queue)),
                                         message_id=old_mess_id,
