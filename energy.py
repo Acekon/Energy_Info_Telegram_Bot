@@ -209,7 +209,6 @@ def save_schedule_send_log(queue: str, text: str, date: str, tg_mess_id: int):
     return True, True
 
 
-
 def get_schedule_send_log(queue: str, date: str):
     conn = sqlite3.connect("energy.db")
     c = conn.cursor()
@@ -431,15 +430,15 @@ def send_notification_schedulers(schedulers, date: str):
             logger.error(f"Invalid date format: {date}")
             color_image = ""
 
-        text = f"Черга {sub_num_queue}, Відключення на {color_image}{date}{color_image}:\n{total_duration}\n<blockquote>{times}</blockquote>"
+        text = f"Черга {sub_num_queue}, Відключення{color_image}{date}{color_image}:\n{total_duration}\n<blockquote>{times}</blockquote>"
         if log_message[0] != text:
             tg_mess_id = telegram_send_text(chat_id=CHANNELS.get(int(num_queue)), text=text)
             old_text, old_mess_id = save_schedule_send_log(queue=sub_num_queue,
                                                            text=text,
                                                            date=date,
                                                            tg_mess_id=tg_mess_id)
-            if not old_mess_id:
-                sleep(1)
+            if old_mess_id:
+                sleep(1.5)
                 telegram_update_message(chat_id=CHANNELS.get(int(num_queue)),
                                         message_id=old_mess_id,
                                         text=f"<s>{old_text}</s>\n UPD: Оновлено графік")
@@ -488,11 +487,11 @@ def main(debug):
             continue
         if schedule and date:
             send_notification_schedulers(schedulers=data_schedule, date=date)
-    if total_durations.is_update:
-        total = total_durations.get()
-        telegram_send_text(chat_id=ENERGY_CHANNEL, text=f'Загальний час відключень на: {date}\n<code>{total}</code>')
-        logger.info('The site is updated successfully')
-        total_durations.is_update = False
+        if total_durations.is_update:
+            total = total_durations.get()
+            telegram_send_text(chat_id=ENERGY_CHANNEL, text=f'Загальний час відключень на: {date}\n<code>{total}</code>')
+            logger.info('The site is updated successfully')
+            total_durations.is_update = False
 
 
 if __name__ == "__main__":
