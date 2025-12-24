@@ -36,8 +36,8 @@ console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s
 console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
-SEND_NOTIFICATIONS = False  # default True, Disable sending notifications for testing
-UPDATE_TEXT_ONLY = True  # default False, Update text only without changing message ID
+SEND_NOTIFICATIONS = True  # default True, Disable sending notifications for testing
+UPDATE_TEXT_ONLY = False  # default False, Update text only without changing message ID
 
 
 class Duration:
