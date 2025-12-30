@@ -42,83 +42,95 @@ UPDATE_TEXT_ONLY = False  # default False, Update text only without changing mes
 
 class Duration:
     def __init__(self):
-        self.total = None
+        self.totals = {}
         self.is_update = False
 
-    def get(self):
-        return self.total
+    def set(self, date, total):
+        old_total = self.totals.get(date)
+        if old_total != total:
+            self.totals[date] = total
+            self.is_update = False
+            logger.info(f"Duration updated for date: {date}")
+        else:
+            self.is_update = False
 
-    def get_queue(self, queue_num):
-        for row in self.total.split("\n"):
+    def get(self, date):
+        return self.totals.get(date)
+
+    def get_queue(self, queue_num, date):
+        total = self.totals.get(date)
+        if not total:
+            return None
+
+        for row in total.split("\n"):
             if f'Черга: {queue_num}' in row:
-                return row.split(" ")[-2], row.split(" ")[-1]
+                parts = row.split()
+                if len(parts) >= 2:
+                    return parts[-2], parts[-1]
+        return None
 
 
 total_durations = Duration()
 
 
-def _telegram_request(url: str, payload: dict) -> dict:
+def _telegram_request(method: str, payload: dict) -> dict:
     if not SEND_NOTIFICATIONS:
-        logger.info(f"--- [TEST MODE] Message NOT sent: {payload.get('chat_id')}")
+        logger.info(f"[TEST MODE] {method} skipped")
         return {"ok": False}
 
-    max_retries: int = 3
-    for attempt in range(max_retries):
-        response = requests.post(url, json=payload)
-        data = response.json()
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT}/{method}"
+    max_attempts = 3
 
-        if data.get("ok"):
-            result = {
-                "ok": data.get("ok"),
-                "id": data.get("result", {}).get("chat", {}).get("id"),
-                "title": data.get("result", {}).get("chat", {}).get("title"),
-                "text": data.get("result", {}).get("text"),
-            }
+    for attempt in range(max_attempts):
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            data = response.json()
 
-            logger.info(result)
+            if data.get("ok"):
+                return data
+
+            if data.get("error_code") == 429:
+                retry_after = data.get("parameters", {}).get("retry_after", 5)
+                logger.warning(f"Rate limit. Waiting {retry_after}s...")
+                sleep(retry_after)
+                continue
+
+            logger.error(f"TG API Error: {data}")
             return data
 
-        if data.get("error_code") == 429:  # Rate limit
-            retry_after = data.get("parameters", {}).get("retry_after", 1)
-            logger.warning(
-                f"Rate limit exceeded. Retrying after {retry_after} seconds (attempt {attempt + 1}).")
-            sleep(int(retry_after))
-            continue
+        except (requests.exceptions.RequestException, Exception) as e:
+            logger.error(f"Network error on {method} (attempt {attempt + 1}/{max_attempts}): {e}")
 
-        logger.error(data)
-        return data
+            if attempt < max_attempts - 1:
+                logger.info("Waiting 60 seconds before next retry...")
+                sleep(60)
+            else:
+                logger.critical("Max retries reached due to network errors.")
 
-    logger.error(f"Max retries reached ({max_retries}). Message not sent.")
     return {"ok": False}
 
 
 def telegram_send_text(chat_id: str, text: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT}/sendMessage"
     payload = {"chat_id": chat_id, "parse_mode": "html", "text": text}
-
-    result = _telegram_request(url, payload)
+    result = _telegram_request("sendMessage", payload)
     return result.get("result", {}).get("message_id")
 
 
 def telegram_update_message(chat_id: str, message_id: int, text: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT}/editMessageText"
     payload = {
         "chat_id": chat_id,
         "message_id": message_id,
         "parse_mode": "html",
         "text": text
     }
-
-    result = _telegram_request(url, payload)
+    result = _telegram_request("editMessageText", payload)
     return result.get("result", {}).get("message_id")
 
 
 def telegram_delete_message(chat_id: str, message_id: int):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT}/deleteMessage"
     payload = {"chat_id": chat_id, "message_id": message_id}
-
-    result = _telegram_request(url, payload)
-    return result.get("ok")
+    result = _telegram_request("deleteMessage", payload)
+    return result.get("ok", False)
 
 
 def site_poe_gvp(date_in):
@@ -153,89 +165,59 @@ def site_poe_gvp(date_in):
     return response.text
 
 
-def convert_date(date_str: str):
+def convert_date(date_str: str) -> str | bool:
+    months = {
+        "січня": "01", "лютого": "02", "березня": "03", "квітня": "04",
+        "травня": "05", "червня": "06", "липня": "07", "серпня": "08",
+        "вересня": "09", "жовтня": "10", "листопада": "11", "грудня": "12"
+    }
     try:
-        months = {
-            "січня": "January", "лютого": "February", "березня": "March",
-            "квітня": "April", "травня": "May", "червня": "June",
-            "липня": "July", "серпня": "August", "вересня": "September",
-            "жовтня": "October", "листопада": "November", "грудня": "December"
-        }
-        for ukr_month, eng_month in months.items():
-            if ukr_month in date_str:
-                date_str = date_str.replace(ukr_month, eng_month)
-                break
-        date_str = date_str.replace(" року", "")
-        date_format = "%d %B %Y"
-        date_obj = datetime.strptime(date_str, date_format)
-    except ValueError as err:
-        logger.error(f"Date conversion error: {err} for date string: {date_str}")
+        day, month_ukr, year, *_ = date_str.replace(" року", "").split()
+        return f"{day.zfill(2)}-{months[month_ukr]}-{year}"
+    except (KeyError, ValueError, IndexError) as err:
+        logging.error(f"Date conversion error: {err} for string: {date_str}")
         return False
-    return date_obj.strftime('%d-%m-%Y')
 
 
 def save_schedule_send_log(queue: str, text: str, current_date: str, tg_mess_id: int):
-    conn = sqlite3.connect("energy.db")
-    c = conn.cursor()
+    with sqlite3.connect("energy.db") as conn:
+        c = conn.cursor()
+        c.execute('SELECT text, tg_mess_id FROM send_log_v2 WHERE date = ? AND queue = ?', (current_date, queue))
+        db = c.fetchone()
 
-    sql_query_select: str = 'SELECT text, tg_mess_id FROM send_log_v2 WHERE date = ? AND queue = ?;'
-    c.execute(sql_query_select, (current_date, queue))
-    db = c.fetchone()
+        if db:
+            if not SEND_NOTIFICATIONS and tg_mess_id == -1:
+                tg_mess_id = db[1]
+            if UPDATE_TEXT_ONLY:
+                sql = 'UPDATE send_log_v2 SET text = ? WHERE date = ? AND queue = ?'
+                params = (text, current_date, queue)
+            else:
+                sql = 'UPDATE send_log_v2 SET text = ?, tg_mess_id = ? WHERE date = ? AND queue = ?'
+                params = (text, tg_mess_id, current_date, queue)
 
-    if db and not SEND_NOTIFICATIONS and tg_mess_id == -1:
-        tg_mess_id = db[1]
+            c.execute(sql, params)
+            logger.info(f"Updated log {queue} {current_date}")
+            return db
+        sql_insert = 'INSERT INTO send_log_v2 (date, text, queue, tg_mess_id) VALUES (?, ?, ?, ?)'
 
-    # --- UPDATE ---
-    if db:
-        if UPDATE_TEXT_ONLY:
-            sql_query = (
-                'UPDATE send_log_v2 '
-                'SET text = ? '
-                'WHERE date = ? AND queue = ?;'
-            )
-            params = (text, current_date, queue)
-        else:
-            sql_query = (
-                'UPDATE send_log_v2 '
-                'SET text = ?, tg_mess_id = ? '
-                'WHERE date = ? AND queue = ?;'
-            )
-            params = (text, tg_mess_id, current_date, queue)
-
-        logger.info(sql_query)
-        c.execute(sql_query, params)
-        conn.commit()
-        conn.close()
-        return db
-
-    # --- INSERT ---
-    sql_query = (
-        'INSERT OR IGNORE INTO send_log_v2 '
-        '(date, text, queue, tg_mess_id) '
-        'VALUES (?, ?, ?, ?);'
-    )
-    logger.info(sql_query)
-    c.execute(sql_query, (current_date, text, queue, tg_mess_id))
-    conn.commit()
-    conn.close()
-    return True, True
+        c.execute(sql_insert, (current_date, text, queue, tg_mess_id))
+        logger.info(f"Inserting new log {queue} {current_date}")
+        return True, True
 
 
 def get_schedule_send_log(queue: str, current_date: str):
-    conn = sqlite3.connect("energy.db")
-    c = conn.cursor()
-    sql_query = 'SELECT text FROM send_log_v2 WHERE queue = ? AND date = ?;'
-    c.execute(sql_query, (queue, current_date))
-    conn.commit()
-    result = c.fetchone()
+    with sqlite3.connect("energy.db") as conn:
+        c = conn.cursor()
+        sql_query = 'SELECT text FROM send_log_v2 WHERE queue = ? AND date = ?;'
+        c.execute(sql_query, (queue, current_date))
+        result = c.fetchone()
     if not result:
         return ['']
     return result
 
 
 def is_last_seven_days_outages_count() -> bool:
-    conn = sqlite3.connect("energy.db")
-    try:
+    with sqlite3.connect("energy.db") as conn:
         c = conn.cursor()
         sql_query = '''
             SELECT text FROM send_log_v2
@@ -245,65 +227,51 @@ def is_last_seven_days_outages_count() -> bool:
         '''
         c.execute(sql_query)
         rows = c.fetchall()
-        if not rows or len(rows) < 7:
+
+    if not rows or len(rows) < 7:
+        return False
+
+    for row in rows:
+        text = row[0] or ''
+        if 'не прогнозується' not in text.lower():
             return False
-        for row in rows:
-            text = row[0] or ''
-            if 'не прогнозується' not in text.lower():
-                return False
-        return True
-    finally:
-        conn.close()
+
+    return True
 
 
-def pars_table(data_table):
-    queue = data_table.find_all('tr')
+def pars_table(data_table, current_date):
+    OFF_CLASSES = {'light_2', 'light_3'}
+    ALL_CLASSES = {'light_1', 'light_2', 'light_3'}
+    queue_rows = data_table.find_all('tr')
     data_queues = []
-    for row in queue:
-        cells = row.find_all('td')
+    for row in queue_rows:
         row_data = []
+        cells = row.find_all('td')
         for cell in cells:
-            if 'light_1' in cell.get('class', []):
-                row_data.append(0)
+            cell_classes = set(cell.get('class', []))
+            if not cell_classes.intersection(ALL_CLASSES):
                 continue
-            if 'light_2' in cell.get('class', []):
-                row_data.append(1)
-                continue
-            if 'light_3' in cell.get('class', []):
-                row_data.append(1)
-                continue
-            if 'turnoff-scheduleui-table-queue' in cell.get('class', []):
-                continue
-            if '12' in cell.get('rowspan', []):
-                continue
-            else:
-                continue
-        data_queues.append(row_data)
-    num = 1
-    sub_num = 1
-    flag = 0
+            status = 1 if cell_classes.intersection(OFF_CLASSES) else 0
+            row_data.append(status)
+        if row_data:
+            data_queues.append(row_data)
+
     resul_queue = []
     duration_total = []
-    for queue in data_queues:
-
+    for i, queue in enumerate(data_queues):
+        q_major = (i // 2) + 1
+        q_minor = (i % 2) + 1
         count = queue.count(1)
         current_total_minutes = count * 30
         minutes_left = 1440 - current_total_minutes
         rem_hours = minutes_left // 60
         rem_minutes = minutes_left % 60
         start_time = index_to_time(count)
-        duration_total.append(f'Черга: {num}.{sub_num} час: -{start_time} +{rem_hours:02}:{rem_minutes:02}')
-        queue_time = queue_time_data(queue_num=num, queue_sub_num=sub_num, time_slots=queue)
+        duration_total.append(f'Черга: {q_major}.{q_minor} час: -{start_time} +{rem_hours:02}:{rem_minutes:02}')
+        queue_time = queue_time_data(queue_num=q_major, queue_sub_num=q_minor, time_slots=queue)
         resul_queue.append(queue_time)
-        if flag == 0:
-            flag = 1
-            sub_num = 2
-            continue
-        if flag == 1:
-            flag = 0
-            num += 1
-            sub_num = 1
-    total_durations.total = '\n'.join(duration_total)
+
+    total_durations.set(current_date, '\n'.join(duration_total))
     return resul_queue
 
 
@@ -312,10 +280,13 @@ def pars_html(response):
     soup = BeautifulSoup(response, 'html.parser')
     gvps = soup.find_all('div', class_='gpvinfodetail')
     schedulers = []
+    current_date = ''
     for gvp in gvps:
-        for current_date in gvp.find_all('b'):
-            if convert_date(current_date.text.strip()):
-                current_date = convert_date(current_date.text.strip())
+        for source_date in gvp.find_all('b'):
+            date_str = source_date.text.strip()
+            converted_date = convert_date(date_str)
+            if converted_date:
+                current_date = converted_date
                 break
         about_day = gvp.find_all('div')
         if any(
@@ -326,7 +297,7 @@ def pars_html(response):
         gvps_table = gvp.find('table', class_='turnoff-scheduleui-table')
         if gvps_table:
             gvps_data = gvps_table.find('tbody')
-            schedulers.append((pars_table(gvps_data), current_date))
+            schedulers.append((pars_table(gvps_data, current_date), current_date))
 
     return schedulers
 
@@ -434,7 +405,7 @@ def send_notification_schedulers(schedulers, current_date: str):
             times = "Черга не входить у період відключень"
 
         color_image = get_day_icon(current_date)
-        light_off, light_on = total_durations.get_queue(sub_num_queue)
+        light_off, light_on = total_durations.get_queue(sub_num_queue, current_date)
         text = f"Черга {sub_num_queue} {color_image}{current_date}{color_image}\nБез світла {light_off}, зі світлом {light_on}\n<blockquote>{times}</blockquote>"
         if log_message[0] != text:
             tg_mess_id = telegram_send_text(chat_id=CHANNELS.get(int(num_queue)), text=text)
@@ -504,8 +475,8 @@ def edit_yesterday_message(id_channel, queue):
 
 def main(debug):
     """Main function"""
-    current_date = datetime.now()
-    formatted_date = current_date.strftime('%d-%m-%Y')
+    query_current_date = datetime.now()
+    formatted_date = query_current_date.strftime('%d-%m-%Y')
     if debug:
         with open('logs/27_10_2025_09_45_41.html', 'r', encoding='utf-8') as f:
             response = f.read()
@@ -516,21 +487,41 @@ def main(debug):
     if response is False:
         return logger.info('The site is not available currently')
     schedulers = pars_html(response)
+    sent_totals = set()
+
     for schedule in schedulers:
         data_schedule = schedule[0]
         date_schedulers = schedule[1]
-        if isinstance(schedule[0], str):
-            send_notification_outages(current_date=date_schedulers, no_power_outages=data_schedule)
+
+        if isinstance(data_schedule, str):
+            send_notification_outages(
+                current_date=date_schedulers,
+                no_power_outages=data_schedule
+            )
             continue
-        if schedule and date_schedulers:
-            send_notification_schedulers(schedulers=data_schedule, current_date=date_schedulers)
-        if total_durations.is_update:
-            total = total_durations.get()
-            telegram_send_text(chat_id=ENERGY_CHANNEL,
-                               text=f'Загальний час відключень на: {date_schedulers}\n<code>{total}</code>')
-            logger.info('The site is updated successfully')
-            total_durations.is_update = False
-    if current_date.time().hour in [0]:
+
+        if date_schedulers:
+            send_notification_schedulers(
+                schedulers=data_schedule,
+                current_date=date_schedulers
+            )
+
+        if total_durations.is_update and date_schedulers not in sent_totals:
+            total = total_durations.get(date_schedulers)
+            if total:
+                telegram_send_text(
+                    chat_id=ENERGY_CHANNEL,
+                    text=(
+                        f'Загальний час відключень на: {date_schedulers}\n'
+                        f'<code>{total}</code>'
+                    )
+                )
+                logger.info('The site is updated successfully')
+
+            sent_totals.add(date_schedulers)
+
+    total_durations.is_update = False
+    if query_current_date.time().hour in [0]:
         mark_old_messages()
 
 
