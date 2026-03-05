@@ -98,8 +98,8 @@ def _telegram_request(method: str, payload: dict) -> dict:
             logger.error(f"TG API Error: {data}")
             return data
 
-        except (requests.exceptions.RequestException, Exception) as e:
-            logger.error(f"Network error on {method} (attempt {attempt + 1}/{max_attempts}): {e}")
+        except (requests.exceptions.RequestException, Exception) as err:
+            logger.error(f"Network error on {method} (attempt {attempt + 1}/{max_attempts}): {err}")
 
             if attempt < max_attempts - 1:
                 logger.info("Waiting 60 seconds before next retry...")
@@ -159,7 +159,7 @@ def site_poe_gvp(date_in):
                            text=f'Status code error {response.status_code}\n')
         return False
     logger.info(f'Load new info {response.url} http:{response.status_code}')
-    with open(f'logs/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
+    with open(f'logs/html/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
         html_page = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="table.css">\n' + response.text
         file.write(html_page)
     return response.text
@@ -494,17 +494,11 @@ def main(debug):
         date_schedulers = schedule[1]
 
         if isinstance(data_schedule, str):
-            send_notification_outages(
-                current_date=date_schedulers,
-                no_power_outages=data_schedule
-            )
+            send_notification_outages(current_date=date_schedulers, no_power_outages=data_schedule)
             continue
 
         if date_schedulers:
-            send_notification_schedulers(
-                schedulers=data_schedule,
-                current_date=date_schedulers
-            )
+            send_notification_schedulers(schedulers=data_schedule, current_date=date_schedulers)
 
         if total_durations.is_update and date_schedulers not in sent_totals:
             total = total_durations.get(date_schedulers)
