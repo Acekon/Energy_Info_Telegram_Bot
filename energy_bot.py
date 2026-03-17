@@ -175,7 +175,8 @@ async def process_subscription(callback_query: CallbackQuery, state: FSMContext)
         save_user_subscribe(callback_query.from_user.id, queue_num)
         user_subscribes = get_user_subscribes(callback_query.from_user.id)
         keyboard = generate_keyboard_subscribe(user_subscribes)
-        logger.info(f"User {callback_query.from_user.full_name} ({callback_query.from_user.id}) subscribed to queue {queue_num}")
+        logger.info(
+            f"User {callback_query.from_user.full_name} ({callback_query.from_user.id}) subscribed to queue {queue_num}")
         await callback_query.message.edit_reply_markup(reply_markup=keyboard)
         await callback_query.answer(f"Subscribed to queue {queue_num}!")
     elif callback_query.data.startswith('unsubscribe:'):
@@ -183,7 +184,8 @@ async def process_subscription(callback_query: CallbackQuery, state: FSMContext)
         remove_user_subscribe(callback_query.from_user.id, queue_num)
         user_subscribes = get_user_subscribes(callback_query.from_user.id)
         keyboard = generate_keyboard_subscribe(user_subscribes)
-        logger.info(f"User {callback_query.from_user.full_name} ({callback_query.from_user.id}) unsubscribed from queue {queue_num}")
+        logger.info(
+            f"User {callback_query.from_user.full_name} ({callback_query.from_user.id}) unsubscribed from queue {queue_num}")
         await callback_query.message.edit_reply_markup(reply_markup=keyboard)
         await callback_query.answer(f"Unsubscribed from queue {queue_num}!")
     else:
@@ -277,12 +279,23 @@ def sync_gvp_schedules():
     for item_scheduler in schedulers:
         target_date = item_scheduler.get("date", request_date)
         update_date = item_scheduler.get("update_date", None)
-
         gvps_data = item_scheduler.get("gvps_data", [])
+
+        if not gvps_data:
+            logger.info(f"No schedule data for {target_date}")
+            for queue in QUEUE_LIST:
+                is_update = save_queue_data(queue=queue, time_slots=[], date=target_date,
+                                            update_date=update_date)
+                if is_update:
+                    save_task_is_update(queue, target_date, 1)
+                    logger.info(f"Updated data for queue {queue} on {target_date}")
+            continue
+
         for schedule in gvps_data:
-            queue = schedule.get("queue").replace('.', '_')
-            time_slots = schedule.get("data")
-            is_update = save_queue_data(queue, time_slots, target_date, update_date=update_date)
+            queue = schedule.get("queue", "").replace('.', '_')
+            time_slots = schedule.get("data", [])
+
+            is_update = save_queue_data(queue=queue, time_slots=time_slots, date=target_date, update_date=update_date)
 
             if is_update:
                 save_task_is_update(queue, target_date, 1)
@@ -320,8 +333,9 @@ async def process_sending_gvp(bot: Bot):
 
                 try:
                     time_slots = json.loads(result[0])
-                    update_date=result[1]
+                    update_date = result[1]
                     text = get_formatted_gvp_text(queue, date_str, time_slots, update_date=update_date)
+                    logger.info(f"Sending update to user {user_id} for queue {queue} on {date_str}")
                     await bot.send_message(user_id, text)
                 except Exception as e:
                     logger.error(f"Send error {user_id}: {e}")
@@ -337,7 +351,7 @@ async def scheduler_loop(bot: Bot):
             sync_gvp_schedules()
             await process_sending_gvp(bot)
         except Exception as e:
-            logger.error(f"Scheduler error: {e}")
+            logger.error(f"Scheduler error: {e}", exc_info=True)
 
         await asyncio.sleep(300)  # 5 minutes
 

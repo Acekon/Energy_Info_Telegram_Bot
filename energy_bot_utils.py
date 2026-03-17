@@ -157,7 +157,7 @@ def parse_html_content(html_content):
 
         #  get table with schedulers GVP
         if len(before_table_html) < 2:
-            return {"about": about, "date": date, "gvps_data": []}
+            return [{"about": about, "date": date, "gvps_data": []}]
         table_gvp = BeautifulSoup(before_table_html[1], 'html.parser')
         gvps_table = table_gvp.find('table', class_='turnoff-scheduleui-table')
         gvps_data = pars_table(gvps_table.find('tbody'))
