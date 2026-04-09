@@ -3,6 +3,7 @@ import html
 import json
 import logging
 import os
+import random
 import sqlite3
 import sys
 import argparse
@@ -19,7 +20,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 
 from energy_bot_utils import parse_html_content, site_poe_gvp, index_to_time, format_schedule_lines, queue_time_data, \
-    save_user_subscribe, get_user_subscribes, remove_user_subscribe, get_all_subscribes
+    save_user_subscribe, get_user_subscribes, remove_user_subscribe, get_all_subscribes, logger
 
 load_dotenv()
 
@@ -34,20 +35,6 @@ last_send_time = {}
 
 dp = Dispatcher()
 QUEUE_LIST = ["1_1", "1_2", "2_1", "2_2", "3_1", "3_2", "4_1", "4_2", "5_1", "5_2", "6_1", "6_2"]
-
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-file_handler = logging.FileHandler("logs/bot.log", encoding="utf-8")
-file_handler.setLevel(logging.INFO)
-file_formatter = logging.Formatter("%(asctime)s - %(module)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
-
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-console_handler.setFormatter(console_formatter)
-logger.addHandler(console_handler)
 
 
 class Subscribe_state(StatesGroup):
@@ -205,7 +192,13 @@ def get_formatted_gvp_text(queue_str, date, time_slots, about="Графік ГП
     result_on = format_schedule_lines(current_gvp, 'data_on')
 
     upd_str = update_date if update_date else datetime.now().strftime('%H:%M:%S')
-
+    if result_on and result_on == "Дані відсутні":
+        return (
+            f"<code>{about}</code>\n"
+            f"Черга ♦️ {queue_num}.{queue_sub_num} ♦️, Відключення на <b>{date}</b>:\n"
+            f"Світло не вимикатимуть\n"
+            f"Оновлено: {upd_str}"
+        )
     return (
         f"<code>{about}</code>\n"
         f"Черга ♦️ {queue_num}.{queue_sub_num} ♦️, Відключення на <b>{date}</b>:\n"
@@ -215,7 +208,7 @@ def get_formatted_gvp_text(queue_str, date, time_slots, about="Графік ГП
     )
 
 
-def save_queue_data(queue, time_slots, date, update_date=None):
+def save_queue_data(queue, time_slots, date, update_date):
     try:
         with sqlite3.connect("energy_bot.db") as conn:
             c = conn.cursor()
@@ -228,8 +221,10 @@ def save_queue_data(queue, time_slots, date, update_date=None):
                 if existing_slots == time_slots:
                     return None
                 c.execute("UPDATE queue_data SET state = 0 WHERE queue = ? AND date = ? AND state = 1", (queue, date))
+                logger.info(f"Updated queue {queue}")
             c.execute("INSERT INTO queue_data (queue, time_slots, date, state, update_date) VALUES (?, ?, ?, ?, ?)",
                       (queue, new_slots_str, date, 1, update_date))
+            logger.info(f"Inserted new data for queue {queue} on {date}")
             conn.commit()
             return True
     except sqlite3.Error as e:
@@ -289,7 +284,6 @@ def sync_gvp_schedules():
                 if is_update:
                     save_task_is_update(queue, target_date, 1)
                     logger.info(f"Updated data for queue {queue} on {target_date}")
-            continue
 
         for schedule in gvps_data:
             queue = schedule.get("queue", "").replace('.', '_')
@@ -348,15 +342,17 @@ async def process_sending_gvp(bot: Bot):
 async def scheduler_loop(bot: Bot):
     while True:
         try:
+            logger.debug("Scheduler loop")
             sync_gvp_schedules()
             await process_sending_gvp(bot)
         except Exception as e:
             logger.error(f"Scheduler error: {e}", exc_info=True)
-
-        await asyncio.sleep(300)  # 5 minutes
+        time_sleep = random.randint(120, 300)
+        await asyncio.sleep(time_sleep)
 
 
 async def main() -> None:
+    """Main function to start the bot."""
     bot = Bot(
         token=BOT_TOKEN,
         session=session,
@@ -364,12 +360,13 @@ async def main() -> None:
     )
 
     asyncio.create_task(scheduler_loop(bot))
-
+    logger.info("Starting energy bot")
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     try:
+        logger.info("Starting script")
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped by user")

@@ -1,8 +1,29 @@
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
+
+
+def setup_logger():
+    loggers = logging.getLogger()
+    loggers.setLevel(logging.INFO)
+    file_handler = logging.FileHandler("logs/bot.log", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter("%(asctime)s - %(module)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(file_formatter)
+    loggers.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    console_handler.setFormatter(console_formatter)
+    loggers.addHandler(console_handler)
+    return loggers
+
+
+logger = setup_logger()
 
 
 def save_user_subscribe(user_id, queue):
@@ -59,10 +80,12 @@ def site_poe_gvp(date_in):
     data = {"seldate": f'{{"date_in":"{date_in}"}}'}
     response = requests.post(url, headers=headers, data=data)
     if response.status_code != 200:
+        logger.error(f"Site PoE GVP request failed with status code: {response.status_code}")
         return False
     with open(f'logs/html/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
         html_page = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="table.css">\n' + response.text
         file.write(html_page)
+    logger.info(f"Data for {date_in} received from site")
     return response.text
 
 
@@ -130,6 +153,10 @@ def convert_date(date_str: str):
 
 
 def parse_html_content(html_content):
+    """
+    :param html_content:
+    :return: [{"about": str, "date": str, "gvps_data": list, 'update_date': str}]
+    """
     soup = BeautifulSoup(html_content, 'html.parser')
     heads = soup.find_all('div', class_='gpvinfodetail')
     result = []
@@ -142,7 +169,6 @@ def parse_html_content(html_content):
         # get update date of GVP
         bs_source = BeautifulSoup(inner_html, 'html.parser')
         update_date = bs_source.find('div', style="text-align: end;font-size: 10px;")
-
         #  get head about text to GVP
         head = before_table_html[0].strip().split("<br/>")
         clear_html_tags = []
@@ -157,11 +183,13 @@ def parse_html_content(html_content):
 
         #  get table with schedulers GVP
         if len(before_table_html) < 2:
-            return [{"about": about, "date": date, "gvps_data": []}]
+            result.append({"about": about, "date": date, "gvps_data": [], 'update_date': update_date.get_text().strip()})
+            continue
         table_gvp = BeautifulSoup(before_table_html[1], 'html.parser')
         gvps_table = table_gvp.find('table', class_='turnoff-scheduleui-table')
         gvps_data = pars_table(gvps_table.find('tbody'))
-        result.append({"about": about, "date": date, "gvps_data": gvps_data, 'update_date': update_date.get_text().strip()})
+        result.append(
+            {"about": about, "date": date, "gvps_data": gvps_data, 'update_date': update_date.get_text().strip()})
     return result
 
 
