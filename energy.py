@@ -98,8 +98,8 @@ def _telegram_request(method: str, payload: dict) -> dict:
             logger.error(f"TG API Error: {data}")
             return data
 
-        except (requests.exceptions.RequestException, Exception) as e:
-            logger.error(f"Network error on {method} (attempt {attempt + 1}/{max_attempts}): {e}")
+        except (requests.exceptions.RequestException, Exception) as err:
+            logger.error(f"Network error on {method} (attempt {attempt + 1}/{max_attempts}): {err}")
 
             if attempt < max_attempts - 1:
                 logger.info("Waiting 60 seconds before next retry...")
@@ -159,7 +159,7 @@ def site_poe_gvp(date_in):
                            text=f'Status code error {response.status_code}\n')
         return False
     logger.info(f'Load new info {response.url} http:{response.status_code}')
-    with open(f'logs/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
+    with open(f'logs/html/{datetime.now().strftime("%d_%m_%Y_%H_%M_%S")}.html', "w", encoding='UTF-8') as file:
         html_page = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="table.css">\n' + response.text
         file.write(html_page)
     return response.text
@@ -430,11 +430,11 @@ def send_notification_outages(current_date, no_power_outages: str):
     sleep(1)
     log_message = get_schedule_send_log(queue='0', current_date=current_date)
     if log_message[0] != no_power_outages:
-        if not is_last_seven_days_outages_count():
-            telegram_send_text(chat_id=TELEGRAM_ADMIN, text=no_power_outages.split('.')[0])
-        else:
-            for channel_id in CHANNELS.values():
-                telegram_send_text(chat_id=channel_id, text=no_power_outages.split('.')[0])
+        # if not is_last_seven_days_outages_count():
+        #    telegram_send_text(chat_id=TELEGRAM_ADMIN, text=no_power_outages.split('.')[0])
+        # else:
+        for channel_id in CHANNELS.values():
+            telegram_send_text(chat_id=channel_id, text=no_power_outages.split('.')[0])
         save_schedule_send_log(queue='0', text=no_power_outages, current_date=current_date, tg_mess_id=0)
         logger.info(f"Send notification power outages - Date: {current_date}")
     else:
@@ -483,9 +483,11 @@ def main(debug):
     else:
         response = site_poe_gvp(formatted_date)
     if not response:
-        return logger.info('The site returns bad html code of the website')
+        logger.info('The site returns bad html code of the website')
+        return False
     if response is False:
-        return logger.info('The site is not available currently')
+        logger.info('The site is not available currently')
+        return False
     schedulers = pars_html(response)
     sent_totals = set()
 
@@ -494,17 +496,11 @@ def main(debug):
         date_schedulers = schedule[1]
 
         if isinstance(data_schedule, str):
-            send_notification_outages(
-                current_date=date_schedulers,
-                no_power_outages=data_schedule
-            )
+            send_notification_outages(current_date=date_schedulers, no_power_outages=data_schedule)
             continue
 
         if date_schedulers:
-            send_notification_schedulers(
-                schedulers=data_schedule,
-                current_date=date_schedulers
-            )
+            send_notification_schedulers(schedulers=data_schedule, current_date=date_schedulers)
 
         if total_durations.is_update and date_schedulers not in sent_totals:
             total = total_durations.get(date_schedulers)
