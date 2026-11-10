@@ -1,4 +1,5 @@
 import logging
+import re
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -96,39 +97,32 @@ def index_to_time(index):
 
 
 def pars_table(data_table):
-    queue = data_table.find_all('tr')
-    data_queues = []
-    for row in queue:
-        cells = row.find_all('td')
-        row_data = []
-        for cell in cells:
-            if 'light_1' in cell.get('class', []):
-                row_data.append(0)
-                continue
-            if 'light_2' in cell.get('class', []) or 'light_3' in cell.get('class', []):
-                row_data.append(1)
-                continue
-            if 'turnoff-scheduleui-table-queue' in cell.get('class', []):
-                continue
-            if '12' in cell.get('rowspan', []):
-                continue
-            else:
-                continue
-        data_queues.append(row_data)
-    num = 1
-    sub_num = 1
-    flag = 0
+    if not data_table:
+        return []
+
     resul_queue = []
-    for queue in data_queues:
-        resul_queue.append({'queue': f'{num}.{sub_num}', 'data': queue})
-        if flag == 0:
-            flag = 1
-            sub_num = 2
+    rows = data_table.find_all('tr')
+
+    for row in rows:
+        q_cell = row.find('td', class_='gpv-q')
+        if not q_cell:
             continue
-        if flag == 1:
-            flag = 0
-            num += 1
-            sub_num = 1
+
+        queue_name = q_cell.text.strip()
+
+        row_data = []
+        cells = row.find_all('td', class_='gpv-c')
+
+        for cell in cells:
+            classes = cell.get('class', [])
+
+            if 'gpv-s1' in classes:
+                row_data.append(0)
+            elif 'gpv-s2' in classes or 'gpv-s3' in classes:
+                row_data.append(1)
+
+        resul_queue.append({'queue': queue_name, 'data': row_data})
+
     return resul_queue
 
 
@@ -147,7 +141,7 @@ def convert_date(date_str: str):
         date_str = date_str.replace(" року", "")
         date_format = "%d %B %Y"
         date_obj = datetime.strptime(date_str, date_format)
-    except ValueError as e:
+    except ValueError:
         return False
     return date_obj.strftime('%d-%m-%Y')
 
@@ -163,33 +157,51 @@ def parse_html_content(html_content):
     for head in heads:
         if not head:
             return False
-        inner_html = head.decode_contents()
-        before_table_html = inner_html.split('<div style="overflow-x:scroll; margin-top:5px;">')
 
-        # get update date of GVP
-        bs_source = BeautifulSoup(inner_html, 'html.parser')
-        update_date = bs_source.find('div', style="text-align: end;font-size: 10px;")
-        #  get head about text to GVP
-        head = before_table_html[0].strip().split("<br/>")
-        clear_html_tags = []
-        for tag in head:
-            item_soup = BeautifulSoup(tag, 'html.parser')
-            clear_html_tags.append(item_soup.get_text().strip())
-        about = "\n".join(clear_html_tags)
+        update_date_elem = head.find('div', style=lambda s: s and 'text-align: end' in s)
+        update_date = update_date_elem.get_text().strip() if update_date_elem else ""
 
-        #  get date of schedule
-        date = BeautifulSoup(before_table_html[0].strip().split("<br/>")[0], 'html.parser')
-        date = convert_date(date.find('b').text)
+        raw_html = head.decode_contents()
 
-        #  get table with schedulers GVP
-        if len(before_table_html) < 2:
-            result.append({"about": about, "date": date, "gvps_data": [], 'update_date': update_date.get_text().strip()})
+        # clean the HTML by removing unwanted tags
+        clean_soup = BeautifulSoup(raw_html, 'html.parser')
+        for tag_name in ['p', 'style', 'div', 'input', 'label', 'img']:
+            for tag in clean_soup.find_all(tag_name):
+                tag.decompose()
+
+        about_lines = [line.strip() for line in clean_soup.get_text().split('\n') if line.strip()]
+        about = "\n".join(about_lines)
+
+        # get date from the <b> tag in the first paragraph
+        b_tags = head.find_all('b')
+        date = False
+        for b in b_tags:
+            if re.search(r'\d{1,2}\s+[а-яА-Яa-zA-Z]+\s+\d{4}', b.text):
+                date = convert_date(b.text.strip())
+                break
+
+        # get the table with class 'gpv-table' inside the current head
+        gvps_table = head.find('table', class_='gpv-table')
+
+        if not gvps_table:
+            result.append({
+                "about": about,
+                "date": date,
+                "gvps_data": [],
+                "update_date": update_date
+            })
             continue
-        table_gvp = BeautifulSoup(before_table_html[1], 'html.parser')
-        gvps_table = table_gvp.find('table', class_='turnoff-scheduleui-table')
-        gvps_data = pars_table(gvps_table.find('tbody'))
-        result.append(
-            {"about": about, "date": date, "gvps_data": gvps_data, 'update_date': update_date.get_text().strip()})
+
+        tbody = gvps_table.find('tbody')
+        gvps_data = pars_table(tbody)
+
+        result.append({
+            "about": about,
+            "date": date,
+            "gvps_data": gvps_data,
+            "update_date": update_date
+        })
+
     return result
 
 

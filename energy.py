@@ -240,27 +240,36 @@ def is_last_seven_days_outages_count() -> bool:
 
 
 def pars_table(data_table, current_date):
-    OFF_CLASSES = {'light_2', 'light_3'}
-    ALL_CLASSES = {'light_1', 'light_2', 'light_3'}
+    OFF_CLASSES = {'gpv-s2', 'gpv-s3'}
+
     queue_rows = data_table.find_all('tr')
     data_queues = []
+    queue_identifiers = []
+
     for row in queue_rows:
+        q_cell = row.find('td', class_='gpv-q')
+        if not q_cell:
+            continue
+
+        queue_text = q_cell.get_text(strip=True)
+        try:
+            q_major, q_minor = map(int, queue_text.split('.'))
+        except ValueError:
+            continue
+
+        cells = row.find_all('td', class_='gpv-c')
         row_data = []
-        cells = row.find_all('td')
         for cell in cells:
             cell_classes = set(cell.get('class', []))
-            if not cell_classes.intersection(ALL_CLASSES):
-                continue
             status = 1 if cell_classes.intersection(OFF_CLASSES) else 0
             row_data.append(status)
         if row_data:
             data_queues.append(row_data)
+            queue_identifiers.append((q_major, q_minor))
 
     resul_queue = []
     duration_total = []
-    for i, queue in enumerate(data_queues):
-        q_major = (i // 2) + 1
-        q_minor = (i % 2) + 1
+    for (q_major, q_minor), queue in zip(queue_identifiers, data_queues):
         count = queue.count(1)
         current_total_minutes = count * 30
         minutes_left = 1440 - current_total_minutes
@@ -294,7 +303,7 @@ def pars_html(response):
                     gvp) for _ in about_day):
             logger.info(f"No power outages")
             schedulers.append((gvp.text.strip(), current_date))
-        gvps_table = gvp.find('table', class_='turnoff-scheduleui-table')
+        gvps_table = gvp.find('table', class_='gpv-table')
         if gvps_table:
             gvps_data = gvps_table.find('tbody')
             schedulers.append((pars_table(gvps_data, current_date), current_date))

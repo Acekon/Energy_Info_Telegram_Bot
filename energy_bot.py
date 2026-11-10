@@ -196,7 +196,7 @@ def get_formatted_gvp_text(queue_str, date, time_slots, about="Графік ГП
         return (
             f"<code>{about}</code>\n"
             f"Черга ♦️ {queue_num}.{queue_sub_num} ♦️, Відключення на <b>{date}</b>:\n"
-            f"Світло не вимикатимуть\n"
+            f"<blockquote>Світло не вимикатимуть</blockquote>\n"
             f"Оновлено: {upd_str}"
         )
     return (
